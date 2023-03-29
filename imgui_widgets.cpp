@@ -4565,7 +4565,9 @@ bool ImGui::InputTextEx(const char* label, const char* hint, char* buf, int buf_
         if (render_cursor)
         {
             state->CursorAnim += io.DeltaTime;
-            bool cursor_is_visible = (!g.IO.ConfigInputTextCursorBlink) || (state->CursorAnim <= 0.0f) || ImFmod(state->CursorAnim, 1.20f) <= 0.80f;
+            // SPEECH_GRAPHICS changed cursor blink to 0.6 (blink every second)
+            bool cursor_is_visible = (!g.IO.ConfigInputTextCursorBlink) || (state->CursorAnim <= 0.0f) || ImFmod(state->CursorAnim, 1.20f) <= 0.60f;
+            //bool cursor_is_visible = (!g.IO.ConfigInputTextCursorBlink) || (state->CursorAnim <= 0.0f) || ImFmod(state->CursorAnim, 1.20f) <= 0.80f;
             ImVec2 cursor_screen_pos = draw_pos + cursor_offset - draw_scroll;
             ImRect cursor_screen_rect(cursor_screen_pos.x, cursor_screen_pos.y - g.FontSize + 0.5f, cursor_screen_pos.x + 1.0f, cursor_screen_pos.y - 1.5f);
             if (cursor_is_visible && cursor_screen_rect.Overlaps(clip_rect))
@@ -4589,7 +4591,10 @@ bool ImGui::InputTextEx(const char* label, const char* hint, char* buf, int buf_
         if (is_multiline || (buf_display_end - buf_display) < buf_display_max_length)
         {
             ImU32 col = GetColorU32(is_displaying_hint ? ImGuiCol_TextDisabled : ImGuiCol_Text);
-            draw_window->DrawList->AddText(g.Font, g.FontSize, draw_pos, col, buf_display, buf_display_end, 0.0f, is_multiline ? NULL : &clip_rect);
+            // SPEECH_GRAPHICS allowed for scrolling non-focused multiline text fields
+            const ImVec2 draw_scroll = state != nullptr ? ImVec2(state->ScrollX, 0.0f): ImVec2(0.0f,0.0f);
+            draw_window->DrawList->AddText(g.Font, g.FontSize, draw_pos - draw_scroll, col, buf_display, buf_display_end, 0.0f, is_multiline ? NULL : &clip_rect);
+            //draw_window->DrawList->AddText(g.Font, g.FontSize, draw_pos, col, buf_display, buf_display_end, 0.0f, is_multiline ? NULL : &clip_rect);
         }
     }
 

@@ -19,9 +19,9 @@
 // - Helper ImGui_ImplVulkanH_XXX functions and structures are only used by this example (main.cpp) and by
 //   the backend itself (imgui_impl_vulkan.cpp), but should PROBABLY NOT be used by your own engine/app code.
 // Read comments in imgui_impl_vulkan.h.
-
 #pragma once
-#include "imgui.h"      // IMGUI_IMPL_API
+
+#include "EventEditor/3rd_party/imgui.h"      // IMGUI_IMPL_API
 
 // [Configuration] in order to use a custom Vulkan function loader:
 // (1) You'll need to disable default Vulkan function prototypes.
@@ -40,6 +40,20 @@
 #define VK_NO_PROTOTYPES
 #endif
 #include <vulkan/vulkan.h>
+
+
+// SPEECH_GRAPHICS the default backend has a global static state which doesn't support mdi
+// As different windows will have different pipelines etc.
+// For this reason we define a structure to hold state which can then be dynamically changed.
+struct ImGuiVulkanState;
+// the state is created in ImGui_ImplVulkan_Init
+// It must be destroyed using the destroy state function ImGui_ImplVulkan_DestroyState
+void ImGui_ImplVulkan_SetState(ImGuiVulkanState* state); // Set the current state before calling any backend code to ensure the right window context is set. Ensure only one thread is using the backend at a time
+ImGuiVulkanState* ImGui_ImplVulkan_GetState(); // Get the current state - this will be set after the call to Init and can be retrieved using this function for later setting
+void ImGui_ImplVulkan_DestroyState(); // Deallocate the state - need to call this to prevent a leak
+
+// SPEECH_GRAPHICS allow for regenerating the font atlas during runtime
+void ImGui_ImplVulkan_RegenerateFontsTexture(VkCommandBuffer command_buffer);
 
 // Initialization data, for ImGui_ImplVulkan_Init()
 // [Please zero-clear before use!]

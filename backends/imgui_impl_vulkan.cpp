@@ -52,6 +52,8 @@
 #include "imgui_impl_vulkan.h"
 #include <stdio.h>
 
+#include <Logging/Log.h>
+
 // Reusable buffers used for rendering 1 current in-flight frame, for ImGui_ImplVulkan_RenderDrawData()
 // [Please zero-clear before use!]
 struct ImGui_ImplVulkanH_FrameRenderBuffers
@@ -73,34 +75,81 @@ struct ImGui_ImplVulkanH_WindowRenderBuffers
     ImGui_ImplVulkanH_FrameRenderBuffers*   FrameRenderBuffers;
 };
 
-// Vulkan data
-static ImGui_ImplVulkan_InitInfo g_VulkanInitInfo = {};
-static VkRenderPass             g_RenderPass = VK_NULL_HANDLE;
-static VkDeviceSize             g_BufferMemoryAlignment = 256;
-static VkPipelineCreateFlags    g_PipelineCreateFlags = 0x00;
-static VkDescriptorSetLayout    g_DescriptorSetLayout = VK_NULL_HANDLE;
-static VkPipelineLayout         g_PipelineLayout = VK_NULL_HANDLE;
-static VkDescriptorSet          g_DescriptorSet = VK_NULL_HANDLE;
-static VkPipeline               g_Pipeline = VK_NULL_HANDLE;
-static uint32_t                 g_Subpass = 0;
-static VkShaderModule           g_ShaderModuleVert;
-static VkShaderModule           g_ShaderModuleFrag;
+// SPEECH_GRAPHICS the default backend has a global static state which doesn't support mdi
+// As different windows will have different pipelines etc.
+// For this reason we define a structure to hold state which can then be dynamically changed.
+// This structure is initialised as current_state in the Init function
+struct ImGuiVulkanState {
+    ImGui_ImplVulkan_InitInfo VulkanInitInfo = {};
+    VkRenderPass             RenderPass = VK_NULL_HANDLE;
+    VkDeviceSize             BufferMemoryAlignment = 256;
+    VkPipelineCreateFlags    PipelineCreateFlags = 0x00;
+    VkDescriptorSetLayout    DescriptorSetLayout = VK_NULL_HANDLE;
+    VkPipelineLayout         PipelineLayout = VK_NULL_HANDLE;
+    VkDescriptorSet          DescriptorSet = VK_NULL_HANDLE;
+    VkPipeline               Pipeline = VK_NULL_HANDLE;
+    uint32_t                 Subpass = 0;
+    VkShaderModule           ShaderModuleVert;
+    VkShaderModule           ShaderModuleFrag;
 #ifdef VK_NO_PROTOTYPES
-static bool                     g_FunctionsLoaded = false;
+    bool                     FunctionsLoaded = false;
 #else
-static bool                     g_FunctionsLoaded = true;
+    bool                     FunctionsLoaded = true;
 #endif
 
-// Font data
-static VkSampler                g_FontSampler = VK_NULL_HANDLE;
-static VkDeviceMemory           g_FontMemory = VK_NULL_HANDLE;
-static VkImage                  g_FontImage = VK_NULL_HANDLE;
-static VkImageView              g_FontView = VK_NULL_HANDLE;
-static VkDeviceMemory           g_UploadBufferMemory = VK_NULL_HANDLE;
-static VkBuffer                 g_UploadBuffer = VK_NULL_HANDLE;
+    // Font data
+    VkSampler                FontSampler = VK_NULL_HANDLE;
+    VkDeviceMemory           FontMemory = VK_NULL_HANDLE;
+    VkImage                  FontImage = VK_NULL_HANDLE;
+    VkImageView              FontView = VK_NULL_HANDLE;
+    VkDeviceMemory           UploadBufferMemory = VK_NULL_HANDLE;
+    VkBuffer                 UploadBuffer = VK_NULL_HANDLE;
 
-// Render buffers
-static ImGui_ImplVulkanH_WindowRenderBuffers    g_MainWindowRenderBuffers;
+    // Render buffers
+    ImGui_ImplVulkanH_WindowRenderBuffers    MainWindowRenderBuffers;
+};
+
+static ImGuiVulkanState* current_state = nullptr;
+void ImGui_ImplVulkan_SetState(ImGuiVulkanState* state) { current_state = state; }
+ImGuiVulkanState* ImGui_ImplVulkan_GetState() { return current_state; }
+void ImGui_ImplVulkan_DestroyState() { delete current_state; }
+
+// SPEECH GRAPHICS Error logging callback
+static void vk_error_check(VkResult x)
+{
+    if (x != VK_SUCCESS)
+        LOG_ERROR("Vulkan call failed: %d", x);
+}
+
+
+//  // Vulkan data
+//  static ImGui_ImplVulkan_InitInfo current_state->VulkanInitInfo = {};
+//  static VkRenderPass             current_state->RenderPass = VK_NULL_HANDLE;
+//  static VkDeviceSize             current_state->BufferMemoryAlignment = 256;
+//  static VkPipelineCreateFlags    current_state->PipelineCreateFlags = 0x00;
+//  static VkDescriptorSetLayout    current_state->DescriptorSetLayout = VK_NULL_HANDLE;
+//  static VkPipelineLayout         current_state->PipelineLayout = VK_NULL_HANDLE;
+//  static VkDescriptorSet          current_state->DescriptorSet = VK_NULL_HANDLE;
+//  static VkPipeline               current_state->Pipeline = VK_NULL_HANDLE;
+//  static uint32_t                 current_state->Subpass = 0;
+//  static VkShaderModule           current_state->ShaderModuleVert;
+//  static VkShaderModule           current_state->ShaderModuleFrag;
+//  #ifdef VK_NO_PROTOTYPES
+//  static bool                     current_state->FunctionsLoaded = false;
+//  #else
+//  static bool                     current_state->FunctionsLoaded = true;
+//  #endif
+//  
+//  // Font data
+//  static VkSampler                current_state->FontSampler = VK_NULL_HANDLE;
+//  static VkDeviceMemory           current_state->FontMemory = VK_NULL_HANDLE;
+//  static VkImage                  current_state->FontImage = VK_NULL_HANDLE;
+//  static VkImageView              current_state->FontView = VK_NULL_HANDLE;
+//  static VkDeviceMemory           current_state->UploadBufferMemory = VK_NULL_HANDLE;
+//  static VkBuffer                 current_state->UploadBuffer = VK_NULL_HANDLE;
+//  
+//  // Render buffers
+//  static ImGui_ImplVulkanH_WindowRenderBuffers    current_state->MainWindowRenderBuffers;
 
 // Forward Declarations
 bool ImGui_ImplVulkan_CreateDeviceObjects();
@@ -296,7 +345,7 @@ static uint32_t __glsl_shader_frag_spv[] =
 
 static uint32_t ImGui_ImplVulkan_MemoryType(VkMemoryPropertyFlags properties, uint32_t type_bits)
 {
-    ImGui_ImplVulkan_InitInfo* v = &g_VulkanInitInfo;
+    ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
     VkPhysicalDeviceMemoryProperties prop;
     vkGetPhysicalDeviceMemoryProperties(v->PhysicalDevice, &prop);
     for (uint32_t i = 0; i < prop.memoryTypeCount; i++)
@@ -307,21 +356,21 @@ static uint32_t ImGui_ImplVulkan_MemoryType(VkMemoryPropertyFlags properties, ui
 
 static void check_vk_result(VkResult err)
 {
-    ImGui_ImplVulkan_InitInfo* v = &g_VulkanInitInfo;
+    ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
     if (v->CheckVkResultFn)
         v->CheckVkResultFn(err);
 }
 
 static void CreateOrResizeBuffer(VkBuffer& buffer, VkDeviceMemory& buffer_memory, VkDeviceSize& p_buffer_size, size_t new_size, VkBufferUsageFlagBits usage)
 {
-    ImGui_ImplVulkan_InitInfo* v = &g_VulkanInitInfo;
+    ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
     VkResult err;
     if (buffer != VK_NULL_HANDLE)
         vkDestroyBuffer(v->Device, buffer, v->Allocator);
     if (buffer_memory != VK_NULL_HANDLE)
         vkFreeMemory(v->Device, buffer_memory, v->Allocator);
 
-    VkDeviceSize vertex_buffer_size_aligned = ((new_size - 1) / g_BufferMemoryAlignment + 1) * g_BufferMemoryAlignment;
+    VkDeviceSize vertex_buffer_size_aligned = ((new_size - 1) / current_state->BufferMemoryAlignment + 1) * current_state->BufferMemoryAlignment;
     VkBufferCreateInfo buffer_info = {};
     buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     buffer_info.size = vertex_buffer_size_aligned;
@@ -332,7 +381,7 @@ static void CreateOrResizeBuffer(VkBuffer& buffer, VkDeviceMemory& buffer_memory
 
     VkMemoryRequirements req;
     vkGetBufferMemoryRequirements(v->Device, buffer, &req);
-    g_BufferMemoryAlignment = (g_BufferMemoryAlignment > req.alignment) ? g_BufferMemoryAlignment : req.alignment;
+    current_state->BufferMemoryAlignment = (current_state->BufferMemoryAlignment > req.alignment) ? current_state->BufferMemoryAlignment : req.alignment;
     VkMemoryAllocateInfo alloc_info = {};
     alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     alloc_info.allocationSize = req.size;
@@ -350,8 +399,8 @@ static void ImGui_ImplVulkan_SetupRenderState(ImDrawData* draw_data, VkPipeline 
     // Bind pipeline and descriptor sets:
     {
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-        VkDescriptorSet desc_set[1] = { g_DescriptorSet };
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, g_PipelineLayout, 0, 1, desc_set, 0, NULL);
+        VkDescriptorSet desc_set[1] = { current_state->DescriptorSet };
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, current_state->PipelineLayout, 0, 1, desc_set, 0, NULL);
     }
 
     // Bind Vertex And Index Buffer:
@@ -384,8 +433,8 @@ static void ImGui_ImplVulkan_SetupRenderState(ImDrawData* draw_data, VkPipeline 
         float translate[2];
         translate[0] = -1.0f - draw_data->DisplayPos.x * scale[0];
         translate[1] = -1.0f - draw_data->DisplayPos.y * scale[1];
-        vkCmdPushConstants(command_buffer, g_PipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(float) * 0, sizeof(float) * 2, scale);
-        vkCmdPushConstants(command_buffer, g_PipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(float) * 2, sizeof(float) * 2, translate);
+        vkCmdPushConstants(command_buffer, current_state->PipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(float) * 0, sizeof(float) * 2, scale);
+        vkCmdPushConstants(command_buffer, current_state->PipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(float) * 2, sizeof(float) * 2, translate);
     }
 }
 
@@ -398,12 +447,12 @@ void ImGui_ImplVulkan_RenderDrawData(ImDrawData* draw_data, VkCommandBuffer comm
     if (fb_width <= 0 || fb_height <= 0)
         return;
 
-    ImGui_ImplVulkan_InitInfo* v = &g_VulkanInitInfo;
+    ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
     if (pipeline == VK_NULL_HANDLE)
-        pipeline = g_Pipeline;
+        pipeline = current_state->Pipeline;
 
     // Allocate array to store enough vertex/index buffers
-    ImGui_ImplVulkanH_WindowRenderBuffers* wrb = &g_MainWindowRenderBuffers;
+    ImGui_ImplVulkanH_WindowRenderBuffers* wrb = &current_state->MainWindowRenderBuffers;
     if (wrb->FrameRenderBuffers == NULL)
     {
         wrb->Index = 0;
@@ -514,9 +563,42 @@ void ImGui_ImplVulkan_RenderDrawData(ImDrawData* draw_data, VkCommandBuffer comm
     }
 }
 
+// SPEECH_GRAPHICS allow for regenerating the font atlas during runtime
+void ImGui_ImplVulkan_RegenerateFontsTexture(VkCommandBuffer command_buffer) {
+
+    if (!current_state) {
+        CL_ERROR << "ImGui Vulkan state invalid.";
+        return;
+    }
+
+    ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
+    if (current_state->FontView) {
+        vkDestroyImageView(v->Device, current_state->FontView, v->Allocator);
+        current_state->FontView = VK_NULL_HANDLE;
+    }
+
+    if (current_state->FontImage) {
+        vkDestroyImage(v->Device, current_state->FontImage, v->Allocator);
+        current_state->FontImage = VK_NULL_HANDLE;
+    }
+
+    if (current_state->FontMemory) {
+        vkFreeMemory(v->Device, current_state->FontMemory, v->Allocator);
+        current_state->FontMemory = VK_NULL_HANDLE;
+    }
+
+    ImGui_ImplVulkan_CreateFontsTexture(command_buffer);
+}
+
+
 bool ImGui_ImplVulkan_CreateFontsTexture(VkCommandBuffer command_buffer)
 {
-    ImGui_ImplVulkan_InitInfo* v = &g_VulkanInitInfo;
+    if (!current_state) {
+        CL_ERROR << "ImGui Vulkan state invalid.";
+        return false;
+    }
+
+    ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
     ImGuiIO& io = ImGui::GetIO();
 
     unsigned char* pixels;
@@ -528,6 +610,7 @@ bool ImGui_ImplVulkan_CreateFontsTexture(VkCommandBuffer command_buffer)
 
     // Create the Image:
     {
+        CL_DEBUG << "Create the image.";
         VkImageCreateInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         info.imageType = VK_IMAGE_TYPE_2D;
@@ -542,43 +625,45 @@ bool ImGui_ImplVulkan_CreateFontsTexture(VkCommandBuffer command_buffer)
         info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
         info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        err = vkCreateImage(v->Device, &info, v->Allocator, &g_FontImage);
+        err = vkCreateImage(v->Device, &info, v->Allocator, &current_state->FontImage);
         check_vk_result(err);
         VkMemoryRequirements req;
-        vkGetImageMemoryRequirements(v->Device, g_FontImage, &req);
+        vkGetImageMemoryRequirements(v->Device, current_state->FontImage, &req);
         VkMemoryAllocateInfo alloc_info = {};
         alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         alloc_info.allocationSize = req.size;
         alloc_info.memoryTypeIndex = ImGui_ImplVulkan_MemoryType(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, req.memoryTypeBits);
-        err = vkAllocateMemory(v->Device, &alloc_info, v->Allocator, &g_FontMemory);
+        err = vkAllocateMemory(v->Device, &alloc_info, v->Allocator, &current_state->FontMemory);
         check_vk_result(err);
-        err = vkBindImageMemory(v->Device, g_FontImage, g_FontMemory, 0);
+        err = vkBindImageMemory(v->Device, current_state->FontImage, current_state->FontMemory, 0);
         check_vk_result(err);
     }
 
     // Create the Image View:
     {
+        CL_DEBUG << "Create the image view.";
         VkImageViewCreateInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        info.image = g_FontImage;
+        info.image = current_state->FontImage;
         info.viewType = VK_IMAGE_VIEW_TYPE_2D;
         info.format = VK_FORMAT_R8G8B8A8_UNORM;
         info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         info.subresourceRange.levelCount = 1;
         info.subresourceRange.layerCount = 1;
-        err = vkCreateImageView(v->Device, &info, v->Allocator, &g_FontView);
+        err = vkCreateImageView(v->Device, &info, v->Allocator, &current_state->FontView);
         check_vk_result(err);
     }
 
     // Update the Descriptor Set:
     {
+        CL_DEBUG << "Update the Descriptor Set.";
         VkDescriptorImageInfo desc_image[1] = {};
-        desc_image[0].sampler = g_FontSampler;
-        desc_image[0].imageView = g_FontView;
+        desc_image[0].sampler = current_state->FontSampler;
+        desc_image[0].imageView = current_state->FontView;
         desc_image[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         VkWriteDescriptorSet write_desc[1] = {};
         write_desc[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write_desc[0].dstSet = g_DescriptorSet;
+        write_desc[0].dstSet = current_state->DescriptorSet;
         write_desc[0].descriptorCount = 1;
         write_desc[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         write_desc[0].pImageInfo = desc_image;
@@ -587,43 +672,46 @@ bool ImGui_ImplVulkan_CreateFontsTexture(VkCommandBuffer command_buffer)
 
     // Create the Upload Buffer:
     {
+        CL_DEBUG << "Create the Upload Buffer.";
         VkBufferCreateInfo buffer_info = {};
         buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         buffer_info.size = upload_size;
         buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
         buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        err = vkCreateBuffer(v->Device, &buffer_info, v->Allocator, &g_UploadBuffer);
+        err = vkCreateBuffer(v->Device, &buffer_info, v->Allocator, &current_state->UploadBuffer);
         check_vk_result(err);
         VkMemoryRequirements req;
-        vkGetBufferMemoryRequirements(v->Device, g_UploadBuffer, &req);
-        g_BufferMemoryAlignment = (g_BufferMemoryAlignment > req.alignment) ? g_BufferMemoryAlignment : req.alignment;
+        vkGetBufferMemoryRequirements(v->Device, current_state->UploadBuffer, &req);
+        current_state->BufferMemoryAlignment = (current_state->BufferMemoryAlignment > req.alignment) ? current_state->BufferMemoryAlignment : req.alignment;
         VkMemoryAllocateInfo alloc_info = {};
         alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         alloc_info.allocationSize = req.size;
         alloc_info.memoryTypeIndex = ImGui_ImplVulkan_MemoryType(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, req.memoryTypeBits);
-        err = vkAllocateMemory(v->Device, &alloc_info, v->Allocator, &g_UploadBufferMemory);
+        err = vkAllocateMemory(v->Device, &alloc_info, v->Allocator, &current_state->UploadBufferMemory);
         check_vk_result(err);
-        err = vkBindBufferMemory(v->Device, g_UploadBuffer, g_UploadBufferMemory, 0);
+        err = vkBindBufferMemory(v->Device, current_state->UploadBuffer, current_state->UploadBufferMemory, 0);
         check_vk_result(err);
     }
 
     // Upload to Buffer:
     {
+        CL_DEBUG << "Upload to Buffer.";
         char* map = NULL;
-        err = vkMapMemory(v->Device, g_UploadBufferMemory, 0, upload_size, 0, (void**)(&map));
+        err = vkMapMemory(v->Device, current_state->UploadBufferMemory, 0, upload_size, 0, (void**)(&map));
         check_vk_result(err);
         memcpy(map, pixels, upload_size);
         VkMappedMemoryRange range[1] = {};
         range[0].sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-        range[0].memory = g_UploadBufferMemory;
+        range[0].memory = current_state->UploadBufferMemory;
         range[0].size = upload_size;
         err = vkFlushMappedMemoryRanges(v->Device, 1, range);
         check_vk_result(err);
-        vkUnmapMemory(v->Device, g_UploadBufferMemory);
+        vkUnmapMemory(v->Device, current_state->UploadBufferMemory);
     }
 
     // Copy to Image:
     {
+        CL_DEBUG << "Copy to Image.";
         VkImageMemoryBarrier copy_barrier[1] = {};
         copy_barrier[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         copy_barrier[0].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -631,7 +719,7 @@ bool ImGui_ImplVulkan_CreateFontsTexture(VkCommandBuffer command_buffer)
         copy_barrier[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         copy_barrier[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         copy_barrier[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        copy_barrier[0].image = g_FontImage;
+        copy_barrier[0].image = current_state->FontImage;
         copy_barrier[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         copy_barrier[0].subresourceRange.levelCount = 1;
         copy_barrier[0].subresourceRange.layerCount = 1;
@@ -643,7 +731,7 @@ bool ImGui_ImplVulkan_CreateFontsTexture(VkCommandBuffer command_buffer)
         region.imageExtent.width = width;
         region.imageExtent.height = height;
         region.imageExtent.depth = 1;
-        vkCmdCopyBufferToImage(command_buffer, g_UploadBuffer, g_FontImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        vkCmdCopyBufferToImage(command_buffer, current_state->UploadBuffer, current_state->FontImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
         VkImageMemoryBarrier use_barrier[1] = {};
         use_barrier[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -653,7 +741,7 @@ bool ImGui_ImplVulkan_CreateFontsTexture(VkCommandBuffer command_buffer)
         use_barrier[0].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         use_barrier[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         use_barrier[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        use_barrier[0].image = g_FontImage;
+        use_barrier[0].image = current_state->FontImage;
         use_barrier[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         use_barrier[0].subresourceRange.levelCount = 1;
         use_barrier[0].subresourceRange.layerCount = 1;
@@ -661,7 +749,8 @@ bool ImGui_ImplVulkan_CreateFontsTexture(VkCommandBuffer command_buffer)
     }
 
     // Store our identifier
-    io.Fonts->SetTexID((ImTextureID)(intptr_t)g_FontImage);
+    CL_DEBUG << "Store our identifier.";
+    io.Fonts->SetTexID((ImTextureID)(intptr_t)current_state->FontImage);
 
     return true;
 }
@@ -669,29 +758,29 @@ bool ImGui_ImplVulkan_CreateFontsTexture(VkCommandBuffer command_buffer)
 static void ImGui_ImplVulkan_CreateShaderModules(VkDevice device, const VkAllocationCallbacks* allocator)
 {
     // Create the shader modules
-    if (g_ShaderModuleVert == NULL)
+    if (current_state->ShaderModuleVert == NULL)
     {
         VkShaderModuleCreateInfo vert_info = {};
         vert_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
         vert_info.codeSize = sizeof(__glsl_shader_vert_spv);
         vert_info.pCode = (uint32_t*)__glsl_shader_vert_spv;
-        VkResult err = vkCreateShaderModule(device, &vert_info, allocator, &g_ShaderModuleVert);
+        VkResult err = vkCreateShaderModule(device, &vert_info, allocator, &current_state->ShaderModuleVert);
         check_vk_result(err);
     }
-    if (g_ShaderModuleFrag == NULL)
+    if (current_state->ShaderModuleFrag == NULL)
     {
         VkShaderModuleCreateInfo frag_info = {};
         frag_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
         frag_info.codeSize = sizeof(__glsl_shader_frag_spv);
         frag_info.pCode = (uint32_t*)__glsl_shader_frag_spv;
-        VkResult err = vkCreateShaderModule(device, &frag_info, allocator, &g_ShaderModuleFrag);
+        VkResult err = vkCreateShaderModule(device, &frag_info, allocator, &current_state->ShaderModuleFrag);
         check_vk_result(err);
     }
 }
 
 static void ImGui_ImplVulkan_CreateFontSampler(VkDevice device, const VkAllocationCallbacks* allocator)
 {
-    if (g_FontSampler)
+    if (current_state->FontSampler)
         return;
 
     VkSamplerCreateInfo info = {};
@@ -705,17 +794,17 @@ static void ImGui_ImplVulkan_CreateFontSampler(VkDevice device, const VkAllocati
     info.minLod = -1000;
     info.maxLod = 1000;
     info.maxAnisotropy = 1.0f;
-    VkResult err = vkCreateSampler(device, &info, allocator, &g_FontSampler);
+    VkResult err = vkCreateSampler(device, &info, allocator, &current_state->FontSampler);
     check_vk_result(err);
 }
 
 static void ImGui_ImplVulkan_CreateDescriptorSetLayout(VkDevice device, const VkAllocationCallbacks* allocator)
 {
-    if (g_DescriptorSetLayout)
+    if (current_state->DescriptorSetLayout)
         return;
 
     ImGui_ImplVulkan_CreateFontSampler(device, allocator);
-    VkSampler sampler[1] = { g_FontSampler };
+    VkSampler sampler[1] = { current_state->FontSampler };
     VkDescriptorSetLayoutBinding binding[1] = {};
     binding[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     binding[0].descriptorCount = 1;
@@ -725,13 +814,13 @@ static void ImGui_ImplVulkan_CreateDescriptorSetLayout(VkDevice device, const Vk
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     info.bindingCount = 1;
     info.pBindings = binding;
-    VkResult err = vkCreateDescriptorSetLayout(device, &info, allocator, &g_DescriptorSetLayout);
+    VkResult err = vkCreateDescriptorSetLayout(device, &info, allocator, &current_state->DescriptorSetLayout);
     check_vk_result(err);
 }
 
 static void ImGui_ImplVulkan_CreatePipelineLayout(VkDevice device, const VkAllocationCallbacks* allocator)
 {
-    if (g_PipelineLayout)
+    if (current_state->PipelineLayout)
         return;
 
     // Constants: we are using 'vec2 offset' and 'vec2 scale' instead of a full 3d projection matrix
@@ -740,14 +829,14 @@ static void ImGui_ImplVulkan_CreatePipelineLayout(VkDevice device, const VkAlloc
     push_constants[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     push_constants[0].offset = sizeof(float) * 0;
     push_constants[0].size = sizeof(float) * 4;
-    VkDescriptorSetLayout set_layout[1] = { g_DescriptorSetLayout };
+    VkDescriptorSetLayout set_layout[1] = { current_state->DescriptorSetLayout };
     VkPipelineLayoutCreateInfo layout_info = {};
     layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     layout_info.setLayoutCount = 1;
     layout_info.pSetLayouts = set_layout;
     layout_info.pushConstantRangeCount = 1;
     layout_info.pPushConstantRanges = push_constants;
-    VkResult  err = vkCreatePipelineLayout(device, &layout_info, allocator, &g_PipelineLayout);
+    VkResult  err = vkCreatePipelineLayout(device, &layout_info, allocator, &current_state->PipelineLayout);
     check_vk_result(err);
 }
 
@@ -758,11 +847,11 @@ static void ImGui_ImplVulkan_CreatePipeline(VkDevice device, const VkAllocationC
     VkPipelineShaderStageCreateInfo stage[2] = {};
     stage[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stage[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    stage[0].module = g_ShaderModuleVert;
+    stage[0].module = current_state->ShaderModuleVert;
     stage[0].pName = "main";
     stage[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stage[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    stage[1].module = g_ShaderModuleFrag;
+    stage[1].module = current_state->ShaderModuleFrag;
     stage[1].pName = "main";
 
     VkVertexInputBindingDescription binding_desc[1] = {};
@@ -838,7 +927,7 @@ static void ImGui_ImplVulkan_CreatePipeline(VkDevice device, const VkAllocationC
 
     VkGraphicsPipelineCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    info.flags = g_PipelineCreateFlags;
+    info.flags = current_state->PipelineCreateFlags;
     info.stageCount = 2;
     info.pStages = stage;
     info.pVertexInputState = &vertex_info;
@@ -849,7 +938,7 @@ static void ImGui_ImplVulkan_CreatePipeline(VkDevice device, const VkAllocationC
     info.pDepthStencilState = &depth_info;
     info.pColorBlendState = &blend_info;
     info.pDynamicState = &dynamic_state;
-    info.layout = g_PipelineLayout;
+    info.layout = current_state->PipelineLayout;
     info.renderPass = renderPass;
     info.subpass = subpass;
     VkResult err = vkCreateGraphicsPipelines(device, pipelineCache, 1, &info, allocator, pipeline);
@@ -858,10 +947,10 @@ static void ImGui_ImplVulkan_CreatePipeline(VkDevice device, const VkAllocationC
 
 bool ImGui_ImplVulkan_CreateDeviceObjects()
 {
-    ImGui_ImplVulkan_InitInfo* v = &g_VulkanInitInfo;
+    ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
     VkResult err;
 
-    if (!g_FontSampler)
+    if (!current_state->FontSampler)
     {
         VkSamplerCreateInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -874,13 +963,13 @@ bool ImGui_ImplVulkan_CreateDeviceObjects()
         info.minLod = -1000;
         info.maxLod = 1000;
         info.maxAnisotropy = 1.0f;
-        err = vkCreateSampler(v->Device, &info, v->Allocator, &g_FontSampler);
+        err = vkCreateSampler(v->Device, &info, v->Allocator, &current_state->FontSampler);
         check_vk_result(err);
     }
 
-    if (!g_DescriptorSetLayout)
+    if (!current_state->DescriptorSetLayout)
     {
-        VkSampler sampler[1] = {g_FontSampler};
+        VkSampler sampler[1] = {current_state->FontSampler};
         VkDescriptorSetLayoutBinding binding[1] = {};
         binding[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         binding[0].descriptorCount = 1;
@@ -890,7 +979,7 @@ bool ImGui_ImplVulkan_CreateDeviceObjects()
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         info.bindingCount = 1;
         info.pBindings = binding;
-        err = vkCreateDescriptorSetLayout(v->Device, &info, v->Allocator, &g_DescriptorSetLayout);
+        err = vkCreateDescriptorSetLayout(v->Device, &info, v->Allocator, &current_state->DescriptorSetLayout);
         check_vk_result(err);
     }
 
@@ -900,64 +989,64 @@ bool ImGui_ImplVulkan_CreateDeviceObjects()
         alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         alloc_info.descriptorPool = v->DescriptorPool;
         alloc_info.descriptorSetCount = 1;
-        alloc_info.pSetLayouts = &g_DescriptorSetLayout;
-        err = vkAllocateDescriptorSets(v->Device, &alloc_info, &g_DescriptorSet);
+        alloc_info.pSetLayouts = &current_state->DescriptorSetLayout;
+        err = vkAllocateDescriptorSets(v->Device, &alloc_info, &current_state->DescriptorSet);
         check_vk_result(err);
     }
 
-    if (!g_PipelineLayout)
+    if (!current_state->PipelineLayout)
     {
         // Constants: we are using 'vec2 offset' and 'vec2 scale' instead of a full 3d projection matrix
         VkPushConstantRange push_constants[1] = {};
         push_constants[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
         push_constants[0].offset = sizeof(float) * 0;
         push_constants[0].size = sizeof(float) * 4;
-        VkDescriptorSetLayout set_layout[1] = { g_DescriptorSetLayout };
+        VkDescriptorSetLayout set_layout[1] = { current_state->DescriptorSetLayout };
         VkPipelineLayoutCreateInfo layout_info = {};
         layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         layout_info.setLayoutCount = 1;
         layout_info.pSetLayouts = set_layout;
         layout_info.pushConstantRangeCount = 1;
         layout_info.pPushConstantRanges = push_constants;
-        err = vkCreatePipelineLayout(v->Device, &layout_info, v->Allocator, &g_PipelineLayout);
+        err = vkCreatePipelineLayout(v->Device, &layout_info, v->Allocator, &current_state->PipelineLayout);
         check_vk_result(err);
     }
 
-    ImGui_ImplVulkan_CreatePipeline(v->Device, v->Allocator, v->PipelineCache, g_RenderPass, v->MSAASamples, &g_Pipeline, g_Subpass);
+    ImGui_ImplVulkan_CreatePipeline(v->Device, v->Allocator, v->PipelineCache, current_state->RenderPass, v->MSAASamples, &current_state->Pipeline, current_state->Subpass);
 
     return true;
 }
 
 void    ImGui_ImplVulkan_DestroyFontUploadObjects()
 {
-    ImGui_ImplVulkan_InitInfo* v = &g_VulkanInitInfo;
-    if (g_UploadBuffer)
+    ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
+    if (current_state->UploadBuffer)
     {
-        vkDestroyBuffer(v->Device, g_UploadBuffer, v->Allocator);
-        g_UploadBuffer = VK_NULL_HANDLE;
+        vkDestroyBuffer(v->Device, current_state->UploadBuffer, v->Allocator);
+        current_state->UploadBuffer = VK_NULL_HANDLE;
     }
-    if (g_UploadBufferMemory)
+    if (current_state->UploadBufferMemory)
     {
-        vkFreeMemory(v->Device, g_UploadBufferMemory, v->Allocator);
-        g_UploadBufferMemory = VK_NULL_HANDLE;
+        vkFreeMemory(v->Device, current_state->UploadBufferMemory, v->Allocator);
+        current_state->UploadBufferMemory = VK_NULL_HANDLE;
     }
 }
 
 void    ImGui_ImplVulkan_DestroyDeviceObjects()
 {
-    ImGui_ImplVulkan_InitInfo* v = &g_VulkanInitInfo;
-    ImGui_ImplVulkanH_DestroyWindowRenderBuffers(v->Device, &g_MainWindowRenderBuffers, v->Allocator);
+    ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
+    ImGui_ImplVulkanH_DestroyWindowRenderBuffers(v->Device, &current_state->MainWindowRenderBuffers, v->Allocator);
     ImGui_ImplVulkan_DestroyFontUploadObjects();
 
-    if (g_ShaderModuleVert)     { vkDestroyShaderModule(v->Device, g_ShaderModuleVert, v->Allocator); g_ShaderModuleVert = VK_NULL_HANDLE; }
-    if (g_ShaderModuleFrag)     { vkDestroyShaderModule(v->Device, g_ShaderModuleFrag, v->Allocator); g_ShaderModuleFrag = VK_NULL_HANDLE; }
-    if (g_FontView)             { vkDestroyImageView(v->Device, g_FontView, v->Allocator); g_FontView = VK_NULL_HANDLE; }
-    if (g_FontImage)            { vkDestroyImage(v->Device, g_FontImage, v->Allocator); g_FontImage = VK_NULL_HANDLE; }
-    if (g_FontMemory)           { vkFreeMemory(v->Device, g_FontMemory, v->Allocator); g_FontMemory = VK_NULL_HANDLE; }
-    if (g_FontSampler)          { vkDestroySampler(v->Device, g_FontSampler, v->Allocator); g_FontSampler = VK_NULL_HANDLE; }
-    if (g_DescriptorSetLayout)  { vkDestroyDescriptorSetLayout(v->Device, g_DescriptorSetLayout, v->Allocator); g_DescriptorSetLayout = VK_NULL_HANDLE; }
-    if (g_PipelineLayout)       { vkDestroyPipelineLayout(v->Device, g_PipelineLayout, v->Allocator); g_PipelineLayout = VK_NULL_HANDLE; }
-    if (g_Pipeline)             { vkDestroyPipeline(v->Device, g_Pipeline, v->Allocator); g_Pipeline = VK_NULL_HANDLE; }
+    if (current_state->ShaderModuleVert)     { vkDestroyShaderModule(v->Device, current_state->ShaderModuleVert, v->Allocator); current_state->ShaderModuleVert = VK_NULL_HANDLE; }
+    if (current_state->ShaderModuleFrag)     { vkDestroyShaderModule(v->Device, current_state->ShaderModuleFrag, v->Allocator); current_state->ShaderModuleFrag = VK_NULL_HANDLE; }
+    if (current_state->FontView)             { vkDestroyImageView(v->Device, current_state->FontView, v->Allocator); current_state->FontView = VK_NULL_HANDLE; }
+    if (current_state->FontImage)            { vkDestroyImage(v->Device, current_state->FontImage, v->Allocator); current_state->FontImage = VK_NULL_HANDLE; }
+    if (current_state->FontMemory)           { vkFreeMemory(v->Device, current_state->FontMemory, v->Allocator); current_state->FontMemory = VK_NULL_HANDLE; }
+    if (current_state->FontSampler)          { vkDestroySampler(v->Device, current_state->FontSampler, v->Allocator); current_state->FontSampler = VK_NULL_HANDLE; }
+    if (current_state->DescriptorSetLayout)  { vkDestroyDescriptorSetLayout(v->Device, current_state->DescriptorSetLayout, v->Allocator); current_state->DescriptorSetLayout = VK_NULL_HANDLE; }
+    if (current_state->PipelineLayout)       { vkDestroyPipelineLayout(v->Device, current_state->PipelineLayout, v->Allocator); current_state->PipelineLayout = VK_NULL_HANDLE; }
+    if (current_state->Pipeline)             { vkDestroyPipeline(v->Device, current_state->Pipeline, v->Allocator); current_state->Pipeline = VK_NULL_HANDLE; }
 }
 
 bool    ImGui_ImplVulkan_LoadFunctions(PFN_vkVoidFunction(*loader_func)(const char* function_name, void* user_data), void* user_data)
@@ -977,13 +1066,17 @@ bool    ImGui_ImplVulkan_LoadFunctions(PFN_vkVoidFunction(*loader_func)(const ch
     IM_UNUSED(loader_func);
     IM_UNUSED(user_data);
 #endif
-    g_FunctionsLoaded = true;
+    current_state->FunctionsLoaded = true;
     return true;
 }
 
 bool    ImGui_ImplVulkan_Init(ImGui_ImplVulkan_InitInfo* info, VkRenderPass render_pass)
 {
-    IM_ASSERT(g_FunctionsLoaded && "Need to call ImGui_ImplVulkan_LoadFunctions() if IMGUI_IMPL_VULKAN_NO_PROTOTYPES or VK_NO_PROTOTYPES are set!");
+    current_state = new ImGuiVulkanState();
+    IM_ASSERT(current_state->FunctionsLoaded && "Need to call ImGui_ImplVulkan_LoadFunctions() if IMGUI_IMPL_VULKAN_NO_PROTOTYPES or VK_NO_PROTOTYPES are set!");
+
+    // Setup error logging callback
+    current_state->VulkanInitInfo.CheckVkResultFn = vk_error_check;
 
     // Setup backend capabilities flags
     ImGuiIO& io = ImGui::GetIO();
@@ -999,9 +1092,9 @@ bool    ImGui_ImplVulkan_Init(ImGui_ImplVulkan_InitInfo* info, VkRenderPass rend
     IM_ASSERT(info->ImageCount >= info->MinImageCount);
     IM_ASSERT(render_pass != VK_NULL_HANDLE);
 
-    g_VulkanInitInfo = *info;
-    g_RenderPass = render_pass;
-    g_Subpass = info->Subpass;
+    current_state->VulkanInitInfo = *info;
+    current_state->RenderPass = render_pass;
+    current_state->Subpass = info->Subpass;
 
     ImGui_ImplVulkan_CreateDeviceObjects();
 
@@ -1020,14 +1113,14 @@ void ImGui_ImplVulkan_NewFrame()
 void ImGui_ImplVulkan_SetMinImageCount(uint32_t min_image_count)
 {
     IM_ASSERT(min_image_count >= 2);
-    if (g_VulkanInitInfo.MinImageCount == min_image_count)
+    if (current_state->VulkanInitInfo.MinImageCount == min_image_count)
         return;
 
-    ImGui_ImplVulkan_InitInfo* v = &g_VulkanInitInfo;
+    ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
     VkResult err = vkDeviceWaitIdle(v->Device);
     check_vk_result(err);
-    ImGui_ImplVulkanH_DestroyWindowRenderBuffers(v->Device, &g_MainWindowRenderBuffers, v->Allocator);
-    g_VulkanInitInfo.MinImageCount = min_image_count;
+    ImGui_ImplVulkanH_DestroyWindowRenderBuffers(v->Device, &current_state->MainWindowRenderBuffers, v->Allocator);
+    current_state->VulkanInitInfo.MinImageCount = min_image_count;
 }
 
 
@@ -1049,7 +1142,7 @@ void ImGui_ImplVulkan_SetMinImageCount(uint32_t min_image_count)
 
 VkSurfaceFormatKHR ImGui_ImplVulkanH_SelectSurfaceFormat(VkPhysicalDevice physical_device, VkSurfaceKHR surface, const VkFormat* request_formats, int request_formats_count, VkColorSpaceKHR request_color_space)
 {
-    IM_ASSERT(g_FunctionsLoaded && "Need to call ImGui_ImplVulkan_LoadFunctions() if IMGUI_IMPL_VULKAN_NO_PROTOTYPES or VK_NO_PROTOTYPES are set!");
+    IM_ASSERT(current_state->FunctionsLoaded && "Need to call ImGui_ImplVulkan_LoadFunctions() if IMGUI_IMPL_VULKAN_NO_PROTOTYPES or VK_NO_PROTOTYPES are set!");
     IM_ASSERT(request_formats != NULL);
     IM_ASSERT(request_formats_count > 0);
 
@@ -1094,7 +1187,7 @@ VkSurfaceFormatKHR ImGui_ImplVulkanH_SelectSurfaceFormat(VkPhysicalDevice physic
 
 VkPresentModeKHR ImGui_ImplVulkanH_SelectPresentMode(VkPhysicalDevice physical_device, VkSurfaceKHR surface, const VkPresentModeKHR* request_modes, int request_modes_count)
 {
-    IM_ASSERT(g_FunctionsLoaded && "Need to call ImGui_ImplVulkan_LoadFunctions() if IMGUI_IMPL_VULKAN_NO_PROTOTYPES or VK_NO_PROTOTYPES are set!");
+    IM_ASSERT(current_state->FunctionsLoaded && "Need to call ImGui_ImplVulkan_LoadFunctions() if IMGUI_IMPL_VULKAN_NO_PROTOTYPES or VK_NO_PROTOTYPES are set!");
     IM_ASSERT(request_modes != NULL);
     IM_ASSERT(request_modes_count > 0);
 
@@ -1297,7 +1390,7 @@ void ImGui_ImplVulkanH_CreateWindowSwapChain(VkPhysicalDevice physical_device, V
 
         // We do not create a pipeline by default as this is also used by examples' main.cpp,
         // but secondary viewport in multi-viewport mode may want to create one with:
-        //ImGui_ImplVulkan_CreatePipeline(device, allocator, VK_NULL_HANDLE, wd->RenderPass, VK_SAMPLE_COUNT_1_BIT, &wd->Pipeline, g_Subpass);
+        //ImGui_ImplVulkan_CreatePipeline(device, allocator, VK_NULL_HANDLE, wd->RenderPass, VK_SAMPLE_COUNT_1_BIT, &wd->Pipeline, current_state->Subpass);
     }
 
     // Create The Image Views
@@ -1345,7 +1438,7 @@ void ImGui_ImplVulkanH_CreateWindowSwapChain(VkPhysicalDevice physical_device, V
 // Create or resize window
 void ImGui_ImplVulkanH_CreateOrResizeWindow(VkInstance instance, VkPhysicalDevice physical_device, VkDevice device, ImGui_ImplVulkanH_Window* wd, uint32_t queue_family, const VkAllocationCallbacks* allocator, int width, int height, uint32_t min_image_count)
 {
-    IM_ASSERT(g_FunctionsLoaded && "Need to call ImGui_ImplVulkan_LoadFunctions() if IMGUI_IMPL_VULKAN_NO_PROTOTYPES or VK_NO_PROTOTYPES are set!");
+    IM_ASSERT(current_state->FunctionsLoaded && "Need to call ImGui_ImplVulkan_LoadFunctions() if IMGUI_IMPL_VULKAN_NO_PROTOTYPES or VK_NO_PROTOTYPES are set!");
     (void)instance;
     ImGui_ImplVulkanH_CreateWindowSwapChain(physical_device, device, wd, allocator, width, height, min_image_count);
     ImGui_ImplVulkanH_CreateWindowCommandBuffers(physical_device, device, wd, queue_family, allocator);
@@ -1354,7 +1447,7 @@ void ImGui_ImplVulkanH_CreateOrResizeWindow(VkInstance instance, VkPhysicalDevic
 void ImGui_ImplVulkanH_DestroyWindow(VkInstance instance, VkDevice device, ImGui_ImplVulkanH_Window* wd, const VkAllocationCallbacks* allocator)
 {
     vkDeviceWaitIdle(device); // FIXME: We could wait on the Queue if we had the queue in wd-> (otherwise VulkanH functions can't use globals)
-    //vkQueueWaitIdle(g_Queue);
+    //vkQueueWaitIdle(current_state->Queue);
 
     for (uint32_t i = 0; i < wd->ImageCount; i++)
     {
