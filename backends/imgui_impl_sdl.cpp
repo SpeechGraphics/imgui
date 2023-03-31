@@ -17,6 +17,7 @@
 
 // CHANGELOG
 // (minor and older changes stripped away, please see git history for details)
+//  2021-03-22: Rework global mouse pos availability check listing supported platforms explicitly, effectively fixing mouse access on Raspberry Pi. (#2837, #3950)
 //  2020-05-25: Misc: Report a zero display-size when window is minimized, to be consistent with other backends.
 //  2020-02-20: Inputs: Fixed mapping for ImGuiKey_KeyPadEnter (using SDL_SCANCODE_KP_ENTER instead of SDL_SCANCODE_RETURN2).
 //  2019-12-17: Inputs: On Wayland, use SDL_GetMouseState (because there is no global mouse state).
@@ -44,12 +45,12 @@
 //  2017-08-25: Inputs: MousePos set to -FLT_MAX,-FLT_MAX when mouse is unavailable/missing (instead of -1,-1).
 //  2016-10-15: Misc: Added a void* user_data parameter to Clipboard function handlers.
 
-#include "imgui.h"
 #include "imgui_impl_sdl.h"
 
 // SDL
 #include <SDL.h>
 #include <SDL_syswm.h>
+#include <SDL_main.h>
 #if defined(__APPLE__)
 #include "TargetConditionals.h"
 #endif
@@ -138,7 +139,7 @@ static bool ImGui_ImplSDL2_Init(SDL_Window* window)
     io.BackendFlags |= ImGuiBackendFlags_HasSetMousePos;        // We can honor io.WantSetMousePos requests (optional, rarely used)
     io.BackendPlatformName = "imgui_impl_sdl";
 
-    // Keyboard mapping. ImGui will use those indices to peek into the io.KeysDown[] array.
+    // Keyboard mapping. Dear ImGui will use those indices to peek into the io.KeysDown[] array.
     io.KeyMap[ImGuiKey_Tab] = SDL_SCANCODE_TAB;
     io.KeyMap[ImGuiKey_LeftArrow] = SDL_SCANCODE_LEFT;
     io.KeyMap[ImGuiKey_RightArrow] = SDL_SCANCODE_RIGHT;
@@ -177,8 +178,14 @@ static bool ImGui_ImplSDL2_Init(SDL_Window* window)
     g_MouseCursors[ImGuiMouseCursor_Hand] = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND);
     g_MouseCursors[ImGuiMouseCursor_NotAllowed] = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NO);
 
-    // Check and store if we are on Wayland
-    g_MouseCanUseGlobalState = strncmp(SDL_GetCurrentVideoDriver(), "wayland", 7) != 0;
+    // Check and store if we are on a SDL backend that supports global mouse position
+    // ("wayland" and "rpi" don't support it, but we chose to use a white-list instead of a black-list)
+    const char* sdl_backend = SDL_GetCurrentVideoDriver();
+    const char* global_mouse_whitelist[] = { "windows", "cocoa", "x11", "DIVE", "VMAN" };
+    g_MouseCanUseGlobalState = false;
+    for (int n = 0; n < IM_ARRAYSIZE(global_mouse_whitelist); n++)
+        if (strncmp(sdl_backend, global_mouse_whitelist[n], strlen(global_mouse_whitelist[n])) == 0)
+            g_MouseCanUseGlobalState = true;
 
 #ifdef _WIN32
     SDL_SysWMinfo wmInfo;
@@ -259,7 +266,7 @@ static void ImGui_ImplSDL2_UpdateMousePosAndButtons()
         {
             // SDL_GetMouseState() gives mouse position seemingly based on the last window entered/focused(?)
             // The creation of a new windows at runtime and SDL_CaptureMouse both seems to severely mess up with that, so we retrieve that position globally.
-            // Won't use this workaround when on Wayland, as there is no global mouse position.
+            // Won't use this workaround on SDL backends that have no global mouse position, like Wayland or RPI
             int wx, wy;
             SDL_GetWindowPosition(focused_window, &wx, &wy);
             SDL_GetGlobalMouseState(&mx, &my);
@@ -299,47 +306,6 @@ static void ImGui_ImplSDL2_UpdateMouseCursor()
     }
 }
 
-static void ImGui_ImplSDL2_UpdateGamepads()
-{
-    ImGuiIO& io = ImGui::GetIO();
-    memset(io.NavInputs, 0, sizeof(io.NavInputs));
-    if ((io.ConfigFlags & ImGuiConfigFlags_NavEnableGamepad) == 0)
-        return;
-
-    // Get gamepad
-    SDL_GameController* game_controller = SDL_GameControllerOpen(0);
-    if (!game_controller)
-    {
-        io.BackendFlags &= ~ImGuiBackendFlags_HasGamepad;
-        return;
-    }
-
-    // Update gamepad inputs
-    #define MAP_BUTTON(NAV_NO, BUTTON_NO)       { io.NavInputs[NAV_NO] = (SDL_GameControllerGetButton(game_controller, BUTTON_NO) != 0) ? 1.0f : 0.0f; }
-    #define MAP_ANALOG(NAV_NO, AXIS_NO, V0, V1) { float vn = (float)(SDL_GameControllerGetAxis(game_controller, AXIS_NO) - V0) / (float)(V1 - V0); if (vn > 1.0f) vn = 1.0f; if (vn > 0.0f && io.NavInputs[NAV_NO] < vn) io.NavInputs[NAV_NO] = vn; }
-    const int thumb_dead_zone = 8000;           // SDL_gamecontroller.h suggests using this value.
-    MAP_BUTTON(ImGuiNavInput_Activate,      SDL_CONTROLLER_BUTTON_A);               // Cross / A
-    MAP_BUTTON(ImGuiNavInput_Cancel,        SDL_CONTROLLER_BUTTON_B);               // Circle / B
-    MAP_BUTTON(ImGuiNavInput_Menu,          SDL_CONTROLLER_BUTTON_X);               // Square / X
-    MAP_BUTTON(ImGuiNavInput_Input,         SDL_CONTROLLER_BUTTON_Y);               // Triangle / Y
-    MAP_BUTTON(ImGuiNavInput_DpadLeft,      SDL_CONTROLLER_BUTTON_DPAD_LEFT);       // D-Pad Left
-    MAP_BUTTON(ImGuiNavInput_DpadRight,     SDL_CONTROLLER_BUTTON_DPAD_RIGHT);      // D-Pad Right
-    MAP_BUTTON(ImGuiNavInput_DpadUp,        SDL_CONTROLLER_BUTTON_DPAD_UP);         // D-Pad Up
-    MAP_BUTTON(ImGuiNavInput_DpadDown,      SDL_CONTROLLER_BUTTON_DPAD_DOWN);       // D-Pad Down
-    MAP_BUTTON(ImGuiNavInput_FocusPrev,     SDL_CONTROLLER_BUTTON_LEFTSHOULDER);    // L1 / LB
-    MAP_BUTTON(ImGuiNavInput_FocusNext,     SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);   // R1 / RB
-    MAP_BUTTON(ImGuiNavInput_TweakSlow,     SDL_CONTROLLER_BUTTON_LEFTSHOULDER);    // L1 / LB
-    MAP_BUTTON(ImGuiNavInput_TweakFast,     SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);   // R1 / RB
-    MAP_ANALOG(ImGuiNavInput_LStickLeft,    SDL_CONTROLLER_AXIS_LEFTX, -thumb_dead_zone, -32768);
-    MAP_ANALOG(ImGuiNavInput_LStickRight,   SDL_CONTROLLER_AXIS_LEFTX, +thumb_dead_zone, +32767);
-    MAP_ANALOG(ImGuiNavInput_LStickUp,      SDL_CONTROLLER_AXIS_LEFTY, -thumb_dead_zone, -32767);
-    MAP_ANALOG(ImGuiNavInput_LStickDown,    SDL_CONTROLLER_AXIS_LEFTY, +thumb_dead_zone, +32767);
-
-    io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
-    #undef MAP_BUTTON
-    #undef MAP_ANALOG
-}
-
 void ImGui_ImplSDL2_NewFrame(SDL_Window* window)
 {
     ImGuiIO& io = ImGui::GetIO();
@@ -364,7 +330,4 @@ void ImGui_ImplSDL2_NewFrame(SDL_Window* window)
 
     ImGui_ImplSDL2_UpdateMousePosAndButtons();
     ImGui_ImplSDL2_UpdateMouseCursor();
-
-    // Update game controllers (if enabled and available)
-    ImGui_ImplSDL2_UpdateGamepads();
 }
