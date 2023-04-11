@@ -66,6 +66,12 @@ struct ImGui_ImplVulkan_InitInfo
     void                            (*CheckVkResultFn)(VkResult err);
 };
 
+struct ImGui_ImplVulkan_Data;
+
+void ImGui_ImplVulkan_SetState(ImGui_ImplVulkan_Data* state); // Set the current state before calling any backend code to ensure the right window context is set. Ensure only one thread is using the backend at a time
+ImGui_ImplVulkan_Data* ImGui_ImplVulkan_GetState(); // Get the current state - this will be set after the call to Init and can be retrieved using this function for later setting
+void ImGui_ImplVulkan_DestroyState(); // Deallocate the state - need to call this to prevent a leak
+
 // Called by user code
 IMGUI_IMPL_API bool         ImGui_ImplVulkan_Init(ImGui_ImplVulkan_InitInfo* info, VkRenderPass render_pass);
 IMGUI_IMPL_API void         ImGui_ImplVulkan_Shutdown();
