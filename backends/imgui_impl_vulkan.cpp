@@ -140,11 +140,7 @@ void ImGui_ImplVulkanH_CreateWindowCommandBuffers(VkPhysicalDevice physical_devi
 
 //SPEECH GRAPHICS
 static ImGui_ImplVulkan_Data* current_state = nullptr;
-
-void ImGui_ImplVulkan_SetState(ImGui_ImplVulkan_Data* state) {
-//    current_state = state;
-    current_state = state;
-}
+void ImGui_ImplVulkan_SetState(ImGui_ImplVulkan_Data* state) { current_state = state; }
 ImGui_ImplVulkan_Data* ImGui_ImplVulkan_GetState() { return current_state; }
 void ImGui_ImplVulkan_DestroyState() { delete current_state; }
 
