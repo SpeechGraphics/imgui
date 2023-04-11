@@ -342,7 +342,6 @@ static ImGui_ImplVulkan_Data* ImGui_ImplVulkan_GetBackendData()
 
 static uint32_t ImGui_ImplVulkan_MemoryType(VkMemoryPropertyFlags properties, uint32_t type_bits)
 {
-    //ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
     ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
     VkPhysicalDeviceMemoryProperties prop;
     vkGetPhysicalDeviceMemoryProperties(v->PhysicalDevice, &prop);
@@ -354,7 +353,6 @@ static uint32_t ImGui_ImplVulkan_MemoryType(VkMemoryPropertyFlags properties, ui
 
 static void check_vk_result(VkResult err)
 {
-    //ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
     if (!current_state)
         return;
     ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
@@ -364,7 +362,6 @@ static void check_vk_result(VkResult err)
 
 static void CreateOrResizeBuffer(VkBuffer& buffer, VkDeviceMemory& buffer_memory, VkDeviceSize& p_buffer_size, size_t new_size, VkBufferUsageFlagBits usage)
 {
-    //ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
     ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
     VkResult err;
     if (buffer != VK_NULL_HANDLE)
@@ -398,8 +395,6 @@ static void CreateOrResizeBuffer(VkBuffer& buffer, VkDeviceMemory& buffer_memory
 
 static void ImGui_ImplVulkan_SetupRenderState(ImDrawData* draw_data, VkPipeline pipeline, VkCommandBuffer command_buffer, ImGui_ImplVulkanH_FrameRenderBuffers* rb, int fb_width, int fb_height)
 {
-    //ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
-
     // Bind pipeline:
     {
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
@@ -449,7 +444,6 @@ void ImGui_ImplVulkan_RenderDrawData(ImDrawData* draw_data, VkCommandBuffer comm
     if (fb_width <= 0 || fb_height <= 0)
         return;
 
-    //ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
     ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
     if (pipeline == VK_NULL_HANDLE)
         pipeline = current_state->Pipeline;
@@ -585,7 +579,6 @@ void ImGui_ImplVulkan_RenderDrawData(ImDrawData* draw_data, VkCommandBuffer comm
 // SPEECH_GRAPHICS allow for regenerating the font atlas during runtime
 void ImGui_ImplVulkan_RegenerateFontsTexture(VkCommandBuffer command_buffer) {
 
-    //ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
     if (!current_state) {
         CL_ERROR << "ImGui Vulkan state invalid.";
         return;
@@ -613,7 +606,6 @@ void ImGui_ImplVulkan_RegenerateFontsTexture(VkCommandBuffer command_buffer) {
 bool ImGui_ImplVulkan_CreateFontsTexture(VkCommandBuffer command_buffer)
 {
     ImGuiIO& io = ImGui::GetIO();
-    //ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
     ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
 
     unsigned char* pixels;
@@ -754,7 +746,6 @@ bool ImGui_ImplVulkan_CreateFontsTexture(VkCommandBuffer command_buffer)
 static void ImGui_ImplVulkan_CreateShaderModules(VkDevice device, const VkAllocationCallbacks* allocator)
 {
     // Create the shader modules
-    //ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
     if (current_state->ShaderModuleVert == VK_NULL_HANDLE)
     {
         VkShaderModuleCreateInfo vert_info = {};
@@ -777,7 +768,6 @@ static void ImGui_ImplVulkan_CreateShaderModules(VkDevice device, const VkAlloca
 
 static void ImGui_ImplVulkan_CreatePipeline(VkDevice device, const VkAllocationCallbacks* allocator, VkPipelineCache pipelineCache, VkRenderPass renderPass, VkSampleCountFlagBits MSAASamples, VkPipeline* pipeline, uint32_t subpass)
 {
-    //ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
     ImGui_ImplVulkan_CreateShaderModules(device, allocator);
 
     VkPipelineShaderStageCreateInfo stage[2] = {};
@@ -881,7 +871,6 @@ static void ImGui_ImplVulkan_CreatePipeline(VkDevice device, const VkAllocationC
 
 bool ImGui_ImplVulkan_CreateDeviceObjects()
 {
-    //ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
     ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
     VkResult err;
 
@@ -942,7 +931,6 @@ bool ImGui_ImplVulkan_CreateDeviceObjects()
 
 void    ImGui_ImplVulkan_DestroyFontUploadObjects()
 {
-    //ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
     ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
     if (current_state->UploadBuffer)
     {
@@ -958,7 +946,6 @@ void    ImGui_ImplVulkan_DestroyFontUploadObjects()
 
 void    ImGui_ImplVulkan_DestroyDeviceObjects()
 {
-    //ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
     ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
     ImGui_ImplVulkanH_DestroyWindowRenderBuffers(v->Device, &current_state->MainWindowRenderBuffers, v->Allocator);
     ImGui_ImplVulkan_DestroyFontUploadObjects();
@@ -1003,7 +990,6 @@ bool    ImGui_ImplVulkan_Init(ImGui_ImplVulkan_InitInfo* info, VkRenderPass rend
     IM_ASSERT(io.BackendRendererUserData == nullptr && "Already initialized a renderer backend!");
 
     // Setup backend capabilities flags
-    //ImGui_ImplVulkan_Data* bd = IM_NEW(ImGui_ImplVulkan_Data)();
     current_state = IM_NEW(ImGui_ImplVulkan_Data)();
     io.BackendRendererUserData = (void*)current_state;
     io.BackendRendererName = "imgui_impl_vulkan";
@@ -1029,7 +1015,6 @@ bool    ImGui_ImplVulkan_Init(ImGui_ImplVulkan_InitInfo* info, VkRenderPass rend
 
 void ImGui_ImplVulkan_Shutdown()
 {
-    //ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
     IM_ASSERT(current_state != nullptr && "No renderer backend to shutdown, or already shutdown?");
     ImGuiIO& io = ImGui::GetIO();
 
@@ -1041,14 +1026,12 @@ void ImGui_ImplVulkan_Shutdown()
 
 void ImGui_ImplVulkan_NewFrame()
 {
-    //ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
     IM_ASSERT(current_state != nullptr && "Did you call ImGui_ImplVulkan_Init()?");
     IM_UNUSED(current_state);
 }
 
 void ImGui_ImplVulkan_SetMinImageCount(uint32_t min_image_count)
 {
-    //ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
     IM_ASSERT(min_image_count >= 2);
     if (current_state->VulkanInitInfo.MinImageCount == min_image_count)
         return;
@@ -1064,7 +1047,6 @@ void ImGui_ImplVulkan_SetMinImageCount(uint32_t min_image_count)
 // FIXME: This is experimental in the sense that we are unsure how to best design/tackle this problem, please post to https://github.com/ocornut/imgui/pull/914 if you have suggestions.
 VkDescriptorSet ImGui_ImplVulkan_AddTexture(VkSampler sampler, VkImageView image_view, VkImageLayout image_layout)
 {
-    //ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
     ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
 
     // Create Descriptor Set:
@@ -1098,7 +1080,6 @@ VkDescriptorSet ImGui_ImplVulkan_AddTexture(VkSampler sampler, VkImageView image
 
 void ImGui_ImplVulkan_RemoveTexture(VkDescriptorSet descriptor_set)
 {
-    //ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
     ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
     vkFreeDescriptorSets(v->Device, v->DescriptorPool, 1, &descriptor_set);
 }
