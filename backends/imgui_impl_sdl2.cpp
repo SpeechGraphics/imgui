@@ -68,12 +68,8 @@
 //  2017-08-25: Inputs: MousePos set to -FLT_MAX,-FLT_MAX when mouse is unavailable/missing (instead of -1,-1).
 //  2016-10-15: Misc: Added a void* user_data parameter to Clipboard function handlers.
 
-<<<<<<< HEAD:backends/imgui_impl_sdl.cpp
-#include "imgui_impl_sdl.h"
-=======
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
->>>>>>> 458a1090314a965dd37b02c918d83077a0142ad5:backends/imgui_impl_sdl2.cpp
 
 // SDL
 #include <SDL.h>
@@ -548,9 +544,6 @@ static void ImGui_ImplSDL2_UpdateMouseCursor()
     }
 }
 
-<<<<<<< HEAD
-void ImGui_ImplSDL2_NewFrame(SDL_Window* window)
-=======
 static void ImGui_ImplSDL2_UpdateGamepads()
 {
     ImGuiIO& io = ImGui::GetIO();
@@ -598,7 +591,6 @@ static void ImGui_ImplSDL2_UpdateGamepads()
 }
 
 void ImGui_ImplSDL2_NewFrame()
->>>>>>> 81160fee56027226bc80b48e196d0332f5541a8c
 {
     ImGui_ImplSDL2_Data* bd = ImGui_ImplSDL2_GetBackendData();
     IM_ASSERT(bd != nullptr && "Did you call ImGui_ImplSDL2_Init()?");
