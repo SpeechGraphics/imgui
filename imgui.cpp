@@ -10910,9 +10910,6 @@ static void MetricsHelpMarker(const char* desc)
     }
 }
 
-#ifndef IMGUI_DISABLE_DEMO_WINDOWS
-namespace ImGui { void ShowFontAtlas(ImFontAtlas* atlas); }
-#endif
 
 void ImGui::ShowMetricsWindow(bool* p_open)
 {
@@ -11116,15 +11113,6 @@ void ImGui::ShowMetricsWindow(bool* p_open)
         TreePop();
     }
 
-    // Details for Fonts
-#ifndef IMGUI_DISABLE_DEMO_WINDOWS
-    ImFontAtlas* atlas = g.IO.Fonts;
-    if (TreeNode("Fonts", "Fonts (%d)", atlas->Fonts.Size))
-    {
-        ShowFontAtlas(atlas);
-        TreePop();
-    }
-#endif
 
     // Details for Docking
 #ifdef IMGUI_HAS_DOCK
