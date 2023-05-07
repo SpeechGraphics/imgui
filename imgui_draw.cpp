@@ -1,4 +1,4 @@
-// dear imgui, v1.84
+// dear imgui, v1.85
 // (drawing and font code)
 
 /*
@@ -2000,7 +2000,7 @@ void    ImFontAtlas::ClearInputData()
     ConfigData.clear();
     CustomRects.clear();
     PackIdMouseCursors = PackIdLines = -1;
-    TexReady = false;
+    // Important: we leave TexReady untouched
 }
 
 void    ImFontAtlas::ClearTexData()
