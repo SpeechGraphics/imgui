@@ -599,6 +599,12 @@ void ImGui_ImplVulkan_RegenerateFontsTexture(VkCommandBuffer command_buffer) {
         vkFreeMemory(v->Device, current_state->FontMemory, v->Allocator);
         current_state->FontMemory = VK_NULL_HANDLE;
     }
+	
+    if (current_state->FontDescriptorSet) {
+        ImGui_ImplVulkan_RemoveTexture(current_state->FontDescriptorSet);
+    }
+
+    ImGui_ImplVulkan_DestroyFontUploadObjects();
 
     ImGui_ImplVulkan_CreateFontsTexture(command_buffer);
 }
