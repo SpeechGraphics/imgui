@@ -128,6 +128,16 @@ struct ImGui_ImplVulkan_Data
     }
 };
 
+struct ImGui_ImplVulkan_TempFontData
+{
+    ImGui_ImplVulkan_InitInfo*   VulkanInitInfo;
+
+    VkDeviceMemory              FontMemory;
+    VkImage                     FontImage;
+    VkImageView                 FontView;
+    VkDescriptorSet             FontDescriptorSet;
+};
+
 // Forward Declarations
 bool ImGui_ImplVulkan_CreateDeviceObjects();
 void ImGui_ImplVulkan_DestroyDeviceObjects();
@@ -140,6 +150,7 @@ void ImGui_ImplVulkanH_CreateWindowCommandBuffers(VkPhysicalDevice physical_devi
 
 //SPEECH GRAPHICS
 static ImGui_ImplVulkan_Data* current_state = nullptr;
+static ImGui_ImplVulkan_TempFontData temp_font_data; // Temp font data, used to be deleted after regenerating fonts
 void ImGui_ImplVulkan_SetState(ImGui_ImplVulkan_Data* state) { current_state = state; }
 ImGui_ImplVulkan_Data* ImGui_ImplVulkan_GetState() { return current_state; }
 void ImGui_ImplVulkan_DestroyState() { delete current_state; }
@@ -584,29 +595,60 @@ void ImGui_ImplVulkan_RegenerateFontsTexture(VkCommandBuffer command_buffer) {
         return;
     }
 
+    // Copy all current font texture data into temp
     ImGui_ImplVulkan_InitInfo* v = &current_state->VulkanInitInfo;
+    temp_font_data.VulkanInitInfo = &current_state->VulkanInitInfo;
+
     if (current_state->FontView) {
-        vkDestroyImageView(v->Device, current_state->FontView, v->Allocator);
+        temp_font_data.FontView = current_state->FontView;
         current_state->FontView = VK_NULL_HANDLE;
     }
 
     if (current_state->FontImage) {
-        vkDestroyImage(v->Device, current_state->FontImage, v->Allocator);
+        temp_font_data.FontImage = current_state->FontImage;
         current_state->FontImage = VK_NULL_HANDLE;
     }
 
     if (current_state->FontMemory) {
-        vkFreeMemory(v->Device, current_state->FontMemory, v->Allocator);
+        temp_font_data.FontMemory = current_state->FontMemory;
         current_state->FontMemory = VK_NULL_HANDLE;
     }
-	
+
     if (current_state->FontDescriptorSet) {
-        ImGui_ImplVulkan_RemoveTexture(current_state->FontDescriptorSet);
+        temp_font_data.FontDescriptorSet = current_state->FontDescriptorSet;
+        current_state->FontDescriptorSet = VK_NULL_HANDLE;
     }
 
-    ImGui_ImplVulkan_DestroyFontUploadObjects();
-
     ImGui_ImplVulkan_CreateFontsTexture(command_buffer);
+}
+
+// SPEECH_GRAPHICS Destroy temp font data
+void ImGui_ImplVulkan_DestroyTempFontData() {
+    ImGui_ImplVulkan_InitInfo* v = temp_font_data.VulkanInitInfo;
+    if (!v) {
+        CL_ERROR << "ImGui Vulkan Init Info invalid. Unable to destroy temporary font data";
+        return;
+    }
+ 
+    if (temp_font_data.FontImage) {
+        vkDestroyImage(v->Device, temp_font_data.FontImage, v->Allocator);
+        temp_font_data.FontImage = VK_NULL_HANDLE;
+    }
+
+    if (temp_font_data.FontView) {
+        vkDestroyImageView(v->Device, temp_font_data.FontView, v->Allocator);
+        temp_font_data.FontView = VK_NULL_HANDLE;
+    }
+
+    if (temp_font_data.FontMemory) {
+        vkFreeMemory(v->Device, temp_font_data.FontMemory, v->Allocator);
+        temp_font_data.FontMemory = VK_NULL_HANDLE;
+    }
+
+    if (temp_font_data.FontDescriptorSet) {
+        vkFreeDescriptorSets(v->Device, v->DescriptorPool, 1, &temp_font_data.FontDescriptorSet);
+        temp_font_data.FontDescriptorSet = VK_NULL_HANDLE;
+    }
 }
 
 bool ImGui_ImplVulkan_CreateFontsTexture(VkCommandBuffer command_buffer)
@@ -948,6 +990,10 @@ void    ImGui_ImplVulkan_DestroyFontUploadObjects()
         vkFreeMemory(v->Device, current_state->UploadBufferMemory, v->Allocator);
         current_state->UploadBufferMemory = VK_NULL_HANDLE;
     }
+
+    // SPEECH_GRAPHICS
+    // Destroy temp font data from previous font
+    ImGui_ImplVulkan_DestroyTempFontData();
 }
 
 void    ImGui_ImplVulkan_DestroyDeviceObjects()
