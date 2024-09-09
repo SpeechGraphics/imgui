@@ -47,6 +47,10 @@
 // SPEECH_GRAPHICS allow for regenerating the font atlas during runtime
 void ImGui_ImplVulkan_RegenerateFontsTexture(VkCommandBuffer command_buffer);
 
+// SPEECH_GRAPHICS Destroy temp font data
+// Requires delayed deletion
+void ImGui_ImplVulkan_DestroyTempFontData();
+
 // Initialization data, for ImGui_ImplVulkan_Init()
 // [Please zero-clear before use!]
 struct ImGui_ImplVulkan_InitInfo
